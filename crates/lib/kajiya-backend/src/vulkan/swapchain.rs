@@ -1,4 +1,7 @@
-use super::{device::Device, surface::Surface};
+use super::{
+    device::{Device, DeviceFrame},
+    surface::Surface,
+};
 use anyhow::Result;
 use ash::{extensions::khr, vk};
 #[allow(unused_imports)]
@@ -17,11 +20,7 @@ pub struct Swapchain {
     pub(crate) raw: vk::SwapchainKHR,
     pub desc: SwapchainDesc,
     pub images: Vec<Arc<crate::Image>>,
-    pub acquire_semaphores: Vec<vk::Semaphore>,
-
-    // TODO: move out of swapchain, make a single semaphore
     pub rendering_finished_semaphores: Vec<vk::Semaphore>,
-    pub next_semaphore: usize,
 
     // Keep a reference in order not to drop after the device
     #[allow(dead_code)]
@@ -69,8 +68,6 @@ impl Swapchain {
         if surface_capabilities.max_image_count != 0 {
             desired_image_count = desired_image_count.min(surface_capabilities.max_image_count);
         }
-
-        log::info!("Swapchain image count: {}", desired_image_count);
 
         //dbg!(&surface_capabilities);
         let surface_resolution = match surface_capabilities.current_extent.width {
@@ -128,6 +125,7 @@ impl Swapchain {
         let swapchain = unsafe { fns.create_swapchain(&swapchain_create_info, None) }.unwrap();
 
         let vk_images = unsafe { fns.get_swapchain_images(swapchain) }.unwrap();
+        log::info!("Swapchain image count: {}", vk_images.len());
         /*let image_views = images
         .iter()
         .map(|image| unsafe {
@@ -178,19 +176,6 @@ impl Swapchain {
             })
             .collect();
 
-        assert_eq!(desired_image_count, images.len() as u32);
-
-        let acquire_semaphores = (0..images.len())
-            .map(|_| {
-                unsafe {
-                    device
-                        .raw
-                        .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-                }
-                .unwrap()
-            })
-            .collect();
-
         let rendering_finished_semaphores = (0..images.len())
             .map(|_| {
                 unsafe {
@@ -207,9 +192,7 @@ impl Swapchain {
             raw: swapchain,
             desc,
             images,
-            acquire_semaphores,
             rendering_finished_semaphores,
-            next_semaphore: 0,
             device: device.clone(),
             surface: surface.clone(),
         })
@@ -221,32 +204,27 @@ impl Swapchain {
 
     pub fn acquire_next_image(
         &mut self,
+        frame: &DeviceFrame,
     ) -> std::result::Result<SwapchainImage, SwapchainAcquireImageErr> {
         puffin::profile_function!();
 
-        let acquire_semaphore = self.acquire_semaphores[self.next_semaphore];
-        let rendering_finished_semaphore = self.rendering_finished_semaphores[self.next_semaphore];
+        // begin_frame waits for this slot's previous submission to consume the acquire semaphore.
+        let acquire_semaphore = frame.swapchain_acquired_semaphore;
 
-        let present_index = unsafe {
-            self.fns.acquire_next_image(
-                self.raw,
-                std::u64::MAX,
-                acquire_semaphore,
-                vk::Fence::null(),
-            )
-        }
-        .map(|(val, _)| val as usize);
+        let acquired_image = unsafe {
+            self.fns
+                .acquire_next_image(self.raw, u64::MAX, acquire_semaphore, vk::Fence::null())
+        };
 
-        match present_index {
-            Ok(present_index) => {
-                assert_eq!(present_index, self.next_semaphore);
-
-                self.next_semaphore = (self.next_semaphore + 1) % self.images.len();
+        match acquired_image {
+            Ok((image_index, _suboptimal)) => {
+                let index = image_index as usize;
+                // Waiting on acquire also completes the previous present wait for this image.
                 Ok(SwapchainImage {
-                    image: self.images[present_index].clone(),
-                    image_index: present_index as u32,
+                    image: self.images[index].clone(),
+                    image_index,
                     acquire_semaphore,
-                    rendering_finished_semaphore,
+                    rendering_finished_semaphore: self.rendering_finished_semaphores[index],
                 })
             }
             Err(err)
@@ -292,6 +270,10 @@ impl Swapchain {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            let _ = self
+                .device
+                .raw
+                .queue_wait_idle(self.device.universal_queue.raw);
             self.fns.destroy_swapchain(self.raw, None);
         }
     }

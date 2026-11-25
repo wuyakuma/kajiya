@@ -6,4 +6,6 @@ Rust shaders are compiled asynchronously in the background (unlike HLSL shaders,
 
 Compiled Rust shaders are currently checked into the repository [`assets/rust-shaders-compiled`](../assets/rust-shaders-compiled) as SPIR-V binaries.
 
-To manually build Rust shaders, navigate to [`crates/bin/rust-shader-builder`](../crates/bin/rust-shader-builder) and run `cargo run --release`.
+To manually build Rust shaders, navigate to [`crates/bin/rust-shader-builder`](../crates/bin/rust-shader-builder) and run `cargo run --locked --release`.
+
+Keep `spirv-std`, `macaw`, and the shader crates on the same `glam` version in the workspace lockfile so shader vectors have matching types. The pinned nightly Cargo used by the shader builder reads lockfile version 3.

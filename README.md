@@ -118,7 +118,7 @@ To build `kajiya` [you need Rust](https://www.rust-lang.org/tools/install).
 Once Rust is installed, open a command prompt in the project folder, then build and run the viewer app via:
 
 ```
-cargo run --bin view --release
+cargo run --locked --bin view --release
 ```
 
 This will compile a binary in the `target/release` folder, and then run it.
@@ -126,7 +126,7 @@ This will compile a binary in the `target/release` folder, and then run it.
 For a list of supported command-line switches see `--help`. In order to pass it through `cargo` to the renderer, you need to separate the `cargo` arguments from `view` arguments using `--` e.g.:
 
 ```
-cargo run --bin view --release -- --help
+cargo run --locked --bin view --release -- --help
 ```
 
 ## Loading assets

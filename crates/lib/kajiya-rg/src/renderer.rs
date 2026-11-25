@@ -85,13 +85,19 @@ pub struct FrameConstantsLayout {
 
 impl Renderer {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<Self> {
+        let mut dynamic_constants_usage = vk::BufferUsageFlags::UNIFORM_BUFFER
+            | vk::BufferUsageFlags::STORAGE_BUFFER
+            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
+        if backend.device.ray_tracing_enabled() {
+            dynamic_constants_usage |=
+                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR;
+        }
+
         let dynamic_constants = DynamicConstants::new({
             backend.device.create_buffer(
                 BufferDesc::new_cpu_to_gpu(
                     DYNAMIC_CONSTANTS_SIZE_BYTES * DYNAMIC_CONSTANTS_BUFFER_COUNT,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER
-                        | vk::BufferUsageFlags::STORAGE_BUFFER
-                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    dynamic_constants_usage,
                 ),
                 "dynamic constants buffer",
                 None,
@@ -217,7 +223,7 @@ impl Renderer {
         // This can block, so we're doing it as late as possible.
 
         let swapchain_image = swapchain
-            .acquire_next_image()
+            .acquire_next_image(&current_frame)
             .ok()
             .expect("swapchain image");
 
